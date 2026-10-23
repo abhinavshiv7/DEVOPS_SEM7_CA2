@@ -1,0 +1,96 @@
+---
+- name: Install NRPE and monitoring plugins
+  ansible.builtin.apt:
+    name:
+      - acl
+      - nagios-nrpe-server
+      - nagios-nrpe-plugin
+      - monitoring-plugins
+      - python3
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Permit only localhost and the monitoring VM to use NRPE
+  ansible.builtin.lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    regexp: '^\s*allowed_hosts='
+    line: "allowed_hosts=127.0.0.1,::1,{{ monitoring_server_address }}"
+  notify: Restart NRPE
+
+- name: Bind NRPE to the host-only interface
+  ansible.builtin.lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    regexp: '^\s*#?\s*server_address='
+    line: "server_address={{ monitoring_agent_bind_address }}"
+  notify: Restart NRPE
+
+- name: Install the CPU monitoring plugin
+  ansible.builtin.copy:
+    src: "{{ monitoring_nagios_source_dir }}/plugins/check_cpu.py"
+    dest: "{{ monitoring_plugin_dir }}/check_cpu"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart NRPE
+
+- name: Install the memory monitoring plugin
+  ansible.builtin.copy:
+    src: "{{ monitoring_nagios_source_dir }}/plugins/check_memory.py"
+    dest: "{{ monitoring_plugin_dir }}/check_memory"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart NRPE
+
+- name: Install the Docker and MongoDB monitoring plugin
+  ansible.builtin.copy:
+    src: "{{ monitoring_nagios_source_dir }}/plugins/check_docker_stack.py"
+    dest: "{{ monitoring_plugin_dir }}/check_docker_stack"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart NRPE
+
+- name: Install attendance NRPE command definitions
+  ansible.builtin.copy:
+    src: "{{ monitoring_nagios_source_dir }}/objects/nrpe-attendance.cfg"
+    dest: /etc/nagios/nrpe.d/attendance.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart NRPE
+
+- name: Allow the NRPE service account to inspect Docker
+  ansible.builtin.user:
+    name: nagios
+    groups: docker
+    append: true
+  notify: Restart NRPE
+
+- name: Enable and start NRPE
+  ansible.builtin.systemd_service:
+    name: nagios-nrpe-server
+    enabled: true
+    state: started
+
+- name: Apply pending NRPE changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify NRPE is listening on the host-only interface
+  ansible.builtin.wait_for:
+    host: "{{ monitoring_agent_bind_address }}"
+    port: 5666
+    state: started
+    timeout: 15
+
+- name: Verify the memory plugin as the NRPE service account
+  ansible.builtin.command: "{{ monitoring_plugin_dir }}/check_memory -w 80 -c 90"
+  become_user: nagios
+  register: nrpe_local_check
+  changed_when: false
+
+- name: Display the NRPE verification result
+  ansible.builtin.debug:
+    var: nrpe_local_check.stdout
+

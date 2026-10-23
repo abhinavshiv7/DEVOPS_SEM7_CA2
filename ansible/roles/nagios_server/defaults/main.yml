@@ -1,0 +1,10 @@
+---
+nagios_bind_address: 192.168.56.20
+nagios_app_address: 192.168.56.10
+nagios_admin_user: nagiosadmin
+nagios_source_dir: "{{ playbook_dir }}/../../nagios"
+nagios_plugin_dir: /usr/lib/nagios/plugins
+nagios_controller_secret_dir: "{{ lookup('env', 'HOME') }}/.ansible/nagios"
+nagios_controller_secret_file: "{{ nagios_controller_secret_dir }}/admin_password"
+nagios_htpasswd_file: /etc/nagios4/htpasswd.users
+

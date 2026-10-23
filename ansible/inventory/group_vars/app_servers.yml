@@ -1,0 +1,11 @@
+---
+docker_users:
+  - "{{ ansible_user }}"
+
+application_user: "{{ ansible_user }}"
+application_group: "{{ ansible_user }}"
+application_bind_address: 192.168.56.10
+application_frontend_port: 5173
+application_frontend_origin: http://192.168.56.10:5173
+application_session_cookie_secure: false
+

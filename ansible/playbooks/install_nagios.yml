@@ -1,0 +1,9 @@
+---
+- name: Install and configure Nagios on the monitoring VM
+  hosts: monitoring_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: nagios_server
+

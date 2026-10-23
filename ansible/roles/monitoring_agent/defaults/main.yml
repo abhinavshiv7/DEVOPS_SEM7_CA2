@@ -1,0 +1,6 @@
+---
+monitoring_server_address: 192.168.56.20
+monitoring_agent_bind_address: 192.168.56.10
+monitoring_nagios_source_dir: "{{ playbook_dir }}/../../nagios"
+monitoring_plugin_dir: /usr/lib/nagios/plugins
+

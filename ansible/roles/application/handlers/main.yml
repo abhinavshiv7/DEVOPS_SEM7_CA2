@@ -1,0 +1,7 @@
+---
+- name: Build and start application stack
+  ansible.builtin.command: docker compose up --build -d --remove-orphans
+  args:
+    chdir: "{{ application_deploy_dir }}"
+  become_user: "{{ application_user }}"
+

@@ -1,0 +1,5 @@
+---
+nagios_bind_address: 192.168.56.20
+nagios_app_address: 192.168.56.10
+nagios_admin_user: nagiosadmin
+

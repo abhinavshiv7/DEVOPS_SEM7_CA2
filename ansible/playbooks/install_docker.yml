@@ -1,0 +1,28 @@
+---
+- name: Configure Docker Engine on application servers
+  hosts: app_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: docker
+
+  post_tasks:
+    - name: Verify Docker Engine is reachable without sudo
+      ansible.builtin.command: docker version
+      become: false
+      register: docker_version_result
+      changed_when: false
+
+    - name: Verify Docker Compose plugin
+      ansible.builtin.command: docker compose version
+      become: false
+      register: compose_version_result
+      changed_when: false
+
+    - name: Display installed client versions
+      ansible.builtin.debug:
+        msg:
+          - "{{ docker_version_result.stdout_lines | first }}"
+          - "{{ compose_version_result.stdout }}"
+

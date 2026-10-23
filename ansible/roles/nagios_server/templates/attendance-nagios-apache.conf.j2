@@ -1,0 +1,34 @@
+ScriptAlias /cgi-bin/nagios4 /usr/lib/cgi-bin/nagios4
+ScriptAlias /nagios4/cgi-bin /usr/lib/cgi-bin/nagios4
+Alias /nagios4/stylesheets /etc/nagios4/stylesheets
+Alias /nagios4 /usr/share/nagios4/htdocs
+
+<Directory /usr/share/nagios4/htdocs>
+    Options FollowSymLinks
+    DirectoryIndex index.php index.html
+    AllowOverride None
+    AuthType Basic
+    AuthName "Attendance Project Monitoring"
+    AuthUserFile "{{ nagios_htpasswd_file }}"
+    Require valid-user
+</Directory>
+
+<Directory /etc/nagios4/stylesheets>
+    Options FollowSymLinks
+    AllowOverride None
+    AuthType Basic
+    AuthName "Attendance Project Monitoring"
+    AuthUserFile "{{ nagios_htpasswd_file }}"
+    Require valid-user
+</Directory>
+
+<Directory /usr/lib/cgi-bin/nagios4>
+    Options ExecCGI
+    AllowOverride None
+    SetHandler cgi-script
+    AuthType Basic
+    AuthName "Attendance Project Monitoring"
+    AuthUserFile "{{ nagios_htpasswd_file }}"
+    Require valid-user
+</Directory>
+

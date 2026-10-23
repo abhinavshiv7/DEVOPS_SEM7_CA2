@@ -1,0 +1,218 @@
+---
+- name: Install Nagios, Apache, NRPE client, and plugins
+  ansible.builtin.apt:
+    name:
+      - nagios4
+      - nagios-nrpe-plugin
+      - monitoring-plugins
+      - apache2
+      - apache2-utils
+      - python3
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the protected Nagios secret directory
+  ansible.builtin.file:
+    path: "{{ nagios_controller_secret_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Load or create the Nagios administrator password
+  ansible.builtin.set_fact:
+    nagios_admin_password: >-
+      {{ lookup(
+        'ansible.builtin.password',
+        nagios_controller_secret_file,
+        length=24,
+        chars=['ascii_letters', 'digits']
+      ) }}
+  no_log: true
+
+- name: Check whether the Nagios password file exists
+  ansible.builtin.stat:
+    path: "{{ nagios_htpasswd_file }}"
+  register: nagios_htpasswd
+
+- name: Verify the configured Nagios administrator password
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -vb
+      - "{{ nagios_htpasswd_file }}"
+      - "{{ nagios_admin_user }}"
+      - "{{ nagios_admin_password }}"
+  register: nagios_password_verification
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: nagios_htpasswd.stat.exists
+
+- name: Create the Nagios administrator password file
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -b
+      - -c
+      - "{{ nagios_htpasswd_file }}"
+      - "{{ nagios_admin_user }}"
+      - "{{ nagios_admin_password }}"
+  no_log: true
+  notify: Restart Apache
+  when: not nagios_htpasswd.stat.exists
+
+- name: Synchronize the Nagios administrator password
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -b
+      - "{{ nagios_htpasswd_file }}"
+      - "{{ nagios_admin_user }}"
+      - "{{ nagios_admin_password }}"
+  no_log: true
+  notify: Restart Apache
+  when:
+    - nagios_htpasswd.stat.exists
+    - (nagios_password_verification.rc | default(1)) != 0
+
+- name: Protect the Nagios password file
+  ansible.builtin.file:
+    path: "{{ nagios_htpasswd_file }}"
+    owner: root
+    group: www-data
+    mode: "0640"
+
+- name: Configure authenticated Nagios CGI authorization
+  ansible.builtin.lineinfile:
+    path: /etc/nagios4/cgi.cfg
+    regexp: "^\\s*{{ item.key }}\\s*="
+    line: "{{ item.key }}={{ item.value }}"
+  loop:
+    - key: use_authentication
+      value: "1"
+    - key: authorized_for_system_information
+      value: "{{ nagios_admin_user }}"
+    - key: authorized_for_configuration_information
+      value: "{{ nagios_admin_user }}"
+    - key: authorized_for_system_commands
+      value: "{{ nagios_admin_user }}"
+    - key: authorized_for_all_services
+      value: "{{ nagios_admin_user }}"
+    - key: authorized_for_all_hosts
+      value: "{{ nagios_admin_user }}"
+    - key: authorized_for_all_service_commands
+      value: "{{ nagios_admin_user }}"
+    - key: authorized_for_all_host_commands
+      value: "{{ nagios_admin_user }}"
+  loop_control:
+    label: "{{ item.key }}"
+  notify:
+    - Restart Nagios
+    - Restart Apache
+
+- name: Bind Apache to the host-only interface
+  ansible.builtin.lineinfile:
+    path: /etc/apache2/ports.conf
+    regexp: '^\s*Listen\s+80\s*$'
+    line: "Listen {{ nagios_bind_address }}:80"
+  notify: Restart Apache
+
+- name: Enable the Apache CGI module
+  ansible.builtin.command: a2enmod cgi
+  register: apache_cgi_module
+  changed_when: "'Enabling module cgi' in apache_cgi_module.stdout"
+  notify: Restart Apache
+
+- name: Disable the permissive packaged Nagios Apache configuration
+  ansible.builtin.command: a2disconf nagios4-cgi
+  register: apache_packaged_nagios_config
+  changed_when: "'Disabling conf nagios4-cgi' in apache_packaged_nagios_config.stdout"
+  failed_when:
+    - apache_packaged_nagios_config.rc != 0
+    - "'does not exist' not in apache_packaged_nagios_config.stderr"
+  notify: Restart Apache
+
+- name: Install the authenticated Nagios Apache configuration
+  ansible.builtin.template:
+    src: attendance-nagios-apache.conf.j2
+    dest: /etc/apache2/conf-available/attendance-nagios.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Apache
+
+- name: Enable the authenticated Nagios Apache configuration
+  ansible.builtin.command: a2enconf attendance-nagios
+  register: apache_nagios_config
+  changed_when: "'Enabling conf attendance-nagios' in apache_nagios_config.stdout"
+  notify: Restart Apache
+
+- name: Disable Ubuntu's sample localhost monitoring object
+  ansible.builtin.lineinfile:
+    path: /etc/nagios4/nagios.cfg
+    regexp: '^\s*cfg_file=/etc/nagios4/objects/localhost\.cfg\s*$'
+    line: '# cfg_file=/etc/nagios4/objects/localhost.cfg'
+  notify: Restart Nagios
+
+- name: Install the custom API health plugin
+  ansible.builtin.copy:
+    src: "{{ nagios_source_dir }}/plugins/check_attendance_api.py"
+    dest: "{{ nagios_plugin_dir }}/check_attendance_api"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart Nagios
+
+- name: Install the attendance application object definitions
+  ansible.builtin.template:
+    src: attendance-app.cfg.j2
+    dest: /etc/nagios4/conf.d/attendance-app.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Nagios
+
+- name: Validate the Nagios configuration
+  ansible.builtin.command: /usr/sbin/nagios4 -v /etc/nagios4/nagios.cfg
+  register: nagios_validation
+  changed_when: false
+
+- name: Apply pending Nagios and Apache changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify NRPE connectivity to the application VM
+  ansible.builtin.command: >-
+    /usr/lib/nagios/plugins/check_nrpe
+    -H {{ nagios_app_address }}
+    -c check_memory
+  register: nagios_nrpe_check
+  changed_when: false
+  retries: 3
+  delay: 5
+  until: nagios_nrpe_check.rc == 0
+
+- name: Verify authenticated access to the Nagios dashboard
+  ansible.builtin.uri:
+    url: "http://{{ nagios_bind_address }}/nagios4/"
+    url_username: "{{ nagios_admin_user }}"
+    url_password: "{{ nagios_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  no_log: true
+
+- name: Verify anonymous dashboard access is rejected
+  ansible.builtin.uri:
+    url: "http://{{ nagios_bind_address }}/nagios4/"
+    status_code: 401
+
+- name: Display Nagios verification details
+  ansible.builtin.debug:
+    msg:
+      - "NRPE check: {{ nagios_nrpe_check.stdout }}"
+      - "Dashboard: http://{{ nagios_bind_address }}/nagios4/"
+      - "Username: {{ nagios_admin_user }}"
+      - "Password is stored only at {{ nagios_controller_secret_file }}"
+

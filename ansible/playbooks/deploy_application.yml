@@ -1,0 +1,9 @@
+---
+- name: Deploy the Student Attendance Tracker
+  hosts: app_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: application
+

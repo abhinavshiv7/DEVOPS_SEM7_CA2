@@ -1,0 +1,16 @@
+---
+application_source_dir: "{{ playbook_dir }}/../../application"
+application_deploy_dir: /opt/student-attendance-tracker
+application_user: "{{ ansible_user }}"
+application_group: "{{ ansible_user }}"
+
+application_bind_address: 192.168.56.10
+application_frontend_port: 5173
+application_frontend_origin: "http://{{ application_bind_address }}:{{ application_frontend_port }}"
+application_session_cookie_secure: false
+application_session_max_age_ms: 604800000
+application_upload_max_bytes: 5242880
+
+application_controller_secret_dir: "{{ lookup('env', 'HOME') }}/.ansible/student-attendance-tracker"
+application_controller_secret_file: "{{ application_controller_secret_dir }}/session_secret"
+

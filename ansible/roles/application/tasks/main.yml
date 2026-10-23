@@ -1,0 +1,94 @@
+---
+- name: Verify Docker is installed
+  ansible.builtin.command: docker compose version
+  become: false
+  changed_when: false
+
+- name: Create the controller's protected secret directory
+  ansible.builtin.file:
+    path: "{{ application_controller_secret_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Load or create the application session secret
+  ansible.builtin.set_fact:
+    application_session_secret: >-
+      {{ lookup(
+        'ansible.builtin.password',
+        application_controller_secret_file,
+        length=64,
+        chars=['ascii_letters', 'digits']
+      ) }}
+  no_log: true
+
+- name: Create the application deployment directory
+  ansible.builtin.file:
+    path: "{{ application_deploy_dir }}"
+    state: directory
+    owner: "{{ application_user }}"
+    group: "{{ application_group }}"
+    mode: "0755"
+
+- name: Copy the independent application source
+  ansible.builtin.copy:
+    src: "{{ application_source_dir }}/"
+    dest: "{{ application_deploy_dir }}/"
+    owner: "{{ application_user }}"
+    group: "{{ application_group }}"
+    directory_mode: "0755"
+  notify: Build and start application stack
+
+- name: Write the protected runtime configuration
+  ansible.builtin.template:
+    src: application.env.j2
+    dest: "{{ application_deploy_dir }}/.env"
+    owner: "{{ application_user }}"
+    group: "{{ application_group }}"
+    mode: "0600"
+  no_log: true
+  notify: Build and start application stack
+
+- name: Apply pending application changes before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure the application stack is running
+  ansible.builtin.command: docker compose up -d --remove-orphans
+  args:
+    chdir: "{{ application_deploy_dir }}"
+  become_user: "{{ application_user }}"
+  register: compose_up_result
+  changed_when: >-
+    'Created' in compose_up_result.stderr or
+    'Started' in compose_up_result.stderr or
+    'Recreated' in compose_up_result.stderr
+
+- name: Wait for the proxied API health endpoint
+  ansible.builtin.uri:
+    url: "{{ application_frontend_origin }}/api/v1/health"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: application_health
+  retries: 30
+  delay: 5
+  until:
+    - application_health.status == 200
+    - application_health.json.status == 'ok'
+
+- name: List the running application services
+  ansible.builtin.command: docker compose ps
+  args:
+    chdir: "{{ application_deploy_dir }}"
+  become_user: "{{ application_user }}"
+  register: compose_status
+  changed_when: false
+
+- name: Display deployment verification
+  ansible.builtin.debug:
+    msg:
+      - "Health endpoint: {{ application_health.json }}"
+      - "{{ compose_status.stdout }}"
+
